@@ -285,17 +285,16 @@ st.pyplot(fig)
 #Tabla de requerimientos
 
 
-
-
 # Crear la columna Asignado
 df["Asignado"] = df["assignees"].apply(
     lambda x: x[0]["username"] if isinstance(x, list) and len(x) > 0 else "Sin asignar"
 )
 
 # Crear la tabla
-tabla = df[["Asignado", "name", "status.status"]].copy()
+tabla = df[["id", "Asignado", "name", "status.status"]].copy()
 
 tabla.columns = [
+    "ID Tarea",
     "Asignado",
     "Requerimiento",
     "Status"
@@ -304,36 +303,57 @@ tabla.columns = [
 st.subheader("Tabla de requerimientos y asignaciones ClickUp")
 
 # ==========================
-# FILTROS ARRIBA DE LA TABLA
+# FILTROS
 # ==========================
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
+    id_tarea = st.text_input(
+    "🆔 ID Tarea",
+    key="id_tarea_clickup"
+)
+
+with col2:
     persona = st.multiselect(
         "Asignado",
         options=sorted(tabla["Asignado"].unique()),
         default=sorted(tabla["Asignado"].unique())
     )
 
-with col2:
+with col3:
     status = st.multiselect(
         "Status",
         options=sorted(tabla["Status"].unique()),
         default=sorted(tabla["Status"].unique())
     )
 
-with col3:
+with col4:
     texto = st.text_input(
-        "Buscar requerimiento"
-    )
+    "🔎 Buscar requerimiento",
+    key="buscar_requerimiento_clickup"
+)
 
-# Aplicar filtros
+# ==========================
+# APLICAR FILTROS
+# ==========================
+
 tabla_filtrada = tabla[
     (tabla["Asignado"].isin(persona)) &
     (tabla["Status"].isin(status))
 ]
 
+# Filtro por ID
+if id_tarea:
+    tabla_filtrada = tabla_filtrada[
+        tabla_filtrada["ID Tarea"].astype(str).str.contains(
+            id_tarea,
+            case=False,
+            na=False
+        )
+    ]
+
+# Filtro por requerimiento
 if texto:
     tabla_filtrada = tabla_filtrada[
         tabla_filtrada["Requerimiento"].str.contains(
