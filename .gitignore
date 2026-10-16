@@ -3,3 +3,5 @@ ejemplos
 plot_types_python.zip
 test.py
 app copy.py
+env
+.streamlit/secrets.toml

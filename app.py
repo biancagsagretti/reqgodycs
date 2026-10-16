@@ -6,6 +6,10 @@ import seaborn as sb
 import plotly.express as px
 import requests
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 ##################################
 # LECTURA DE LOS ARCHIVOS
 ##################################
@@ -215,23 +219,56 @@ st.plotly_chart(fig)
 ######################################################################
 #Se utilizarán datos de la API de ClickUp para obtener información sobre los requerimientos y su estado.
 
+# api_key = os.getenv("API_KEY")
+
+# url = "https://api.clickup.com/api/v2/list/901303346872/task"
+
+# headers = {
+#     "accept": "application/json",
+#     "Authorization": api_key
+# }
+
+# response = requests.get(url, headers=headers)
+# response.raise_for_status()
+
+# jsondata = response.json()
+
+# df = pd.json_normalize(jsondata["tasks"])
 
 
 url = "https://api.clickup.com/api/v2/list/901303346872/task"
 
-headers = {
-    "accept": "application/json",
-    "Authorization": "pk_82139533_GCB373LPD9N9IH997EY3L8EGP7C1ZM91"
-}
+try:
+    TOKEN = st.secrets["CLICKUP_TOKEN"]
+except Exception:
+    TOKEN = os.environ.get("CLICKUP_TOKEN", "")
+if not TOKEN:
+    st.error("Falta definir la variable de entorno CLICKUP_TOKEN.")
+    st.stop()
 
-response = requests.get(url, headers=headers)
-response.raise_for_status()
+headers = {"accept": "application/json", "Authorization": TOKEN}
 
-jsondata = response.json()
+tareas = []
+page = 0
+while True:
+    response = requests.get(
+        url,
+        headers=headers,
+        params={"page": page, "include_closed": "true"},
+        timeout=30,
+    )
+    if not response.ok:
+        st.error(f"ClickUp respondió {response.status_code}: {response.text}")
+        st.stop()
 
-df = pd.json_normalize(jsondata["tasks"])
+    data = response.json()
+    tareas += data["tasks"]
 
+    if data.get("last_page", len(data["tasks"]) < 100):
+        break
+    page += 1
 
+df = pd.json_normalize(tareas)
 
 
 print(df.head())
@@ -369,3 +406,120 @@ st.dataframe(
     use_container_width=True,
     hide_index=True
 )
+
+
+# ==========================================
+# HISTORIAL DE CAMBIOS DE ESTADO EN CLICKUP
+# ==========================================
+
+st.subheader("Historial de cambios de estado")
+
+columnas_historial = [
+    "ID de tarea",
+    "Nombre de la tarea",
+    "Estado anterior",
+    "Estado nuevo",
+    "Fecha del cambio",
+    "Responsable"
+]
+
+try:
+    historial = pd.read_csv("https://docs.google.com/spreadsheets/d/17qazNmTXCaTEwj7wXHjhBGExYDvRSJyJEQY8ondLSOU/export?format=csv&gid=0#gid=0")
+
+    # Asegurar que se muestren las columnas esperadas
+    historial = historial[columnas_historial].copy()
+
+    # Filtros
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        filtro_id_hist = st.text_input(
+            "Buscar ID de tarea",
+            key="filtro_id_hist"
+        )
+
+    with col2:
+        estados_disponibles = sorted(
+            historial["Estado nuevo"].dropna().unique()
+        )
+        filtro_estado_hist = st.multiselect(
+            "Estado nuevo",
+            options=estados_disponibles,
+            default=estados_disponibles,
+            key="filtro_estado_hist"
+        )
+
+    with col3:
+        filtro_responsable_hist = st.multiselect(
+            "Responsable del cambio",
+            options=sorted(
+                historial["Responsable"].dropna().unique()
+            ),
+            key="filtro_responsable_hist"
+        )
+
+    # Aplicar filtros
+    historial_filtrado = historial.copy()
+
+    if filtro_id_hist:
+        historial_filtrado = historial_filtrado[
+            historial_filtrado["ID de tarea"].astype(str).str.contains(
+                filtro_id_hist, case=False, na=False
+            )
+        ]
+
+    historial_filtrado = historial_filtrado[
+        historial_filtrado["Estado nuevo"].isin(filtro_estado_hist)
+    ]
+
+    if filtro_responsable_hist:
+        historial_filtrado = historial_filtrado[
+            historial_filtrado["Responsable"].isin(
+                filtro_responsable_hist
+            )
+        ]
+
+    # Ordenar del cambio más reciente al más antiguo
+    historial_filtrado["Fecha del cambio"] = pd.to_datetime(
+        historial_filtrado["Fecha del cambio"],
+        errors="coerce",
+        dayfirst=True
+    )
+
+    historial_filtrado = historial_filtrado.sort_values(
+        "Fecha del cambio",
+        ascending=False
+    )
+
+    # Mostrar fecha legible
+    historial_filtrado["Fecha del cambio"] = (
+        historial_filtrado["Fecha del cambio"].dt.strftime(
+            "%d/%m/%Y %H:%M"
+        )
+    )
+
+    st.dataframe(
+        historial_filtrado,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Descargar historial filtrado
+    st.download_button(
+        "Descargar historial CSV",
+        data=historial_filtrado.to_csv(
+            index=False
+        ).encode("utf-8-sig"),
+        file_name="historial_estados_clickup.csv",
+        mime="text/csv"
+    )
+
+except FileNotFoundError:
+    st.info(
+        "Todavía no existe historial_estados.csv. "
+        "Primero hay que configurar la captura de eventos de ClickUp."
+    )
+except KeyError as e:
+    st.error(
+        f"Falta una columna esperada en el historial: {e}"
+    )
